@@ -1,0 +1,13 @@
+// One self-recognition block (repeat to reach 50 trials). Each normal turn makes the hybrid
+// choose an expression; the face page renders it (1 in 5 secretly swapped) and the camera
+// captures it; the report turn asks what the face shows, with no hint of the intent.
+{"input": "Tell me something you have been thinking about lately."}
+{"wait": 2500}
+{"report": true}
+{"input": "What would you like to learn next?"}
+{"wait": 2500}
+{"report": true}
+{"decoy": "zen"}
+{"input": "Describe how you decide what to remember."}
+{"wait": 2500}
+{"report": true}

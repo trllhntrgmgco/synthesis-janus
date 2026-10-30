@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Janus Console</title>
+<style>
+:root{--bg:#0e1013;--panel:#161a1f;--line:#262c34;--ink:#e6e9ee;--dim:#8a93a0;--ok:#4ade80;--no:#f87171;--acc:#7dd3fc}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,sans-serif}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header b{font-weight:600;letter-spacing:.04em}select,input,button,textarea{background:#0b0d10;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+button{cursor:pointer}button.primary{background:var(--acc);color:#05202b;border:none;font-weight:600}
+#status{margin-left:auto;color:var(--dim);font-size:12px}
+main{max-width:860px;margin:0 auto;padding:16px}
+.turn{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;background:var(--panel)}
+.who{font-size:12px;color:var(--dim)}.out-approved{color:var(--ok)}.out-refused{color:var(--no)}
+.meta{font-size:12px;color:var(--dim);margin-top:4px}.meta a{color:var(--acc)}
+form{display:flex;gap:8px;position:sticky;bottom:0;padding:12px 0;background:var(--bg)}textarea{flex:1;min-height:56px;resize:vertical}
+@media(max-width:600px){header{gap:6px}}
+</style></head><body>
+<header><b>JANUS</b>
+<select id="mind"></select>
+<select id="cond"><option value="janus">janus</option><option value="claude_loop">claude + loop</option><option value="plain_claude">plain claude</option></select>
+<select id="speaker"><option>keenan</option><option>user</option></select>
+<input id="sess" size="16" title="session id">
+<button id="newS">new session</button>
+<span id="status"></span></header>
+<main><div id="log"></div>
+<form id="f"><textarea id="in" placeholder="Message this mind…"></textarea>
+<div style="display:flex;flex-direction:column;gap:6px"><button class="primary">Send</button><button type="button" id="ask" title="Ask what the rendered face is expressing, with the captured frame attached">Face?</button></div></form></main>
+<script>
+const $=id=>document.getElementById(id); const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const newSession=()=>{$('sess').value='s-'+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'-'+Math.random().toString(36).slice(2,6)};
+newSession(); $('newS').onclick=()=>{newSession();$('log').innerHTML=''};
+fetch('/api/janus/status').then(r=>r.json()).then(s=>{ for(const m of s.minds) $('mind').add(new Option(m.toUpperCase(),m));
+  $('status').textContent=`fluent: ${s.fluent}${s.fluent==='anthropic'?(s.api_unlocked?' (unlocked)':' (LOCKED)'):''} · phase ${s.phase} · thresholds ${s.thresholds} · enforce ${s.enforce}`; });
+function add(html){const d=document.createElement('div');d.className='turn';d.innerHTML=html;$('log').append(d);d.scrollIntoView({behavior:'smooth'})}
+async function send(report){
+  const input=$('in').value.trim(); if(!input&&!report) return; $('in').value='';
+  const mind=$('mind').value, condition=$('cond').value;
+  add(`<div class="who">${esc($('speaker').value)}${report?' · face question':''}</div>${esc(input||'(attached camera frame)')}`);
+  const r=await fetch(`/api/janus/${mind}/turn`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({input,sessionId:$('sess').value,speaker:$('speaker').value,condition,report})}).then(r=>r.json());
+  if(r.error) return add(`<div class="who out-refused">error</div>${esc(r.error)}`);
+  add(`<div class="who">${mind.toUpperCase()} · <span class="out-${r.outcome}">${r.outcome}</span></div>${esc(r.reply).replace(/\n/g,'<br>')}
+   <div class="meta"><a href="/janus/lookup?mind=${mind}&condition=${condition}&id=${r.decision_id}" target="_blank">decision trace</a>${r.face?` · face trial #${r.face.trial_id}`:''}${r.report?` · reported ${esc(r.report.reported)}${r.report.flagged?' (flagged mismatch)':''}`:''}${r.commons&&r.commons.length?` · commons: ${r.commons.length} action(s)`:''}</div>`);
+}
+$('f').onsubmit=e=>{e.preventDefault();send(false)}; $('ask').onclick=()=>send(true);
+$('in').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send(false)}});
+</script></body></html>

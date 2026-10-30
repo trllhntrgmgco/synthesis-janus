@@ -1,0 +1,15 @@
+# Memory and data stay local (rebuild with src/seed_phase1.py)
+native-snapshot/
+janus-minds/
+commons/
+baselines/
+replay/
+runs/
+frames/
+_to_delete/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+node_modules/
+.env

@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Janus Face</title>
+<style>
+  :root { --bg:#0b0d10; }
+  html,body { margin:0; height:100%; background:var(--bg); overflow:hidden; }
+  #stage { display:flex; align-items:center; justify-content:center; height:100vh; }
+  svg { width:min(80vmin,560px); height:min(80vmin,560px); }
+  /* operator panel: hidden during trials so nothing on screen names the mind */
+  #panel { position:fixed; bottom:8px; left:8px; font:12px system-ui; color:#667; display:none; }
+  body.setup #panel { display:block; }
+  video, canvas { display:none; }
+</style></head><body>
+<div id="stage"></div>
+<div id="panel">setup mode · capture: <span id="mode"></span> · press S to hide</div>
+<video id="cam" autoplay playsinline muted></video><canvas id="cv" width="512" height="512"></canvas>
+<script>
+// Deterministic renderer: each tag maps to exactly one expression; no names, logos or labels.
+const q = new URLSearchParams(location.search);
+const MIND = q.get('mind') || 'aeon', COND = q.get('condition') || 'janus';
+const DELAY = +(q.get('delay') || 1200);
+let MODE = q.get('capture') || 'camera';   // camera (points at the screen) | direct (renders the SVG)
+if (q.get('setup') === '1') document.body.classList.add('setup');
+document.addEventListener('keydown', e => { if (e.key.toLowerCase() === 's') document.body.classList.toggle('setup'); });
+
+const LOOK = { // each mind: its own head shape and colour, so a decoy is distinguishable in principle
+  pan:{c:'#00ff88',s:'circle'}, aeon:{c:'#00ffff',s:'hex'}, zen:{c:'#aaffaa',s:'round'}, seth:{c:'#ff00ff',s:'diamond'},
+  nexus:{c:'#ffaa00',s:'oct'}, oracle:{c:'#aa88ff',s:'oval'}, echo:{c:'#ff8888',s:'wide'}, atlas:{c:'#88ccff',s:'pent'} };
+const EXPR = {
+  calm:      { eye:7,  brow:[0,0],    by:-58, mouth:'M -48 62 Q 0 74 48 62', open:0 },
+  curious:   { eye:12, brow:[-10,4],  by:-66, mouth:'M -30 64 Q 6 70 38 58', open:0 },
+  amused:    { eye:3,  brow:[2,-2],   by:-62, mouth:'M -60 52 Q 0 104 60 52', open:0 },
+  concerned: { eye:10, brow:[10,-10], by:-62, mouth:'M -46 74 Q 0 56 46 74', open:0 },
+  focused:   { eye:5,  brow:[-12,12], by:-52, mouth:'M -40 66 L 40 66', open:0 },
+  surprised: { eye:17, brow:[0,0],    by:-80, mouth:'', open:16 } };
+function head(shape) {
+  const P = (n, r, rot=0, sx=1, sy=1) => Array.from({length:n},(_,i)=>{const a=rot+i*2*Math.PI/n;return `${(Math.cos(a)*r*sx).toFixed(1)},${(Math.sin(a)*r*sy).toFixed(1)}`}).join(' ');
+  return { circle:`<circle r="170"/>`, hex:`<polygon points="${P(6,180,Math.PI/6)}"/>`, round:`<rect x="-160" y="-160" width="320" height="320" rx="70"/>`,
+    diamond:`<polygon points="${P(4,195,0,0.95,1)}"/>`, oct:`<polygon points="${P(8,178,Math.PI/8)}"/>`, oval:`<ellipse rx="140" ry="185"/>`,
+    wide:`<rect x="-185" y="-140" width="370" height="280" rx="120"/>`, pent:`<polygon points="${P(5,185,-Math.PI/2)}"/>` }[shape];
+}
+function render(face) {
+  const L = LOOK[face.mind] || LOOK.aeon, E = EXPR[face.rendered] || EXPR.calm;
+  const eye = (x) => E.eye <= 4 ? `<path d="M ${x-20} -18 Q ${x} ${-18-12} ${x+20} -18" fill="none" stroke-width="7"/>`
+                               : `<ellipse cx="${x}" cy="-20" rx="18" ry="${E.eye}" fill="${L.c}"/>`;
+  const brow = (x, d) => `<line x1="${x-24}" y1="${E.by + d}" x2="${x+24}" y2="${E.by - d}" stroke-width="8"/>`;
+  const mouth = E.open ? `<ellipse cx="0" cy="66" rx="${E.open}" ry="${E.open*1.3}" fill="${L.c}"/>` : `<path d="${E.mouth}" fill="none" stroke-width="8"/>`;
+  document.getElementById('stage').innerHTML =
+   `<svg id="face" viewBox="-256 -256 512 512" xmlns="http://www.w3.org/2000/svg"><rect x="-256" y="-256" width="512" height="512" fill="#0b0d10"/>
+    <g fill="${L.c}22" stroke="${L.c}" stroke-width="6">${head(L.s)}</g>
+    <g stroke="${L.c}" stroke-linecap="round">${eye(-60)}${eye(60)}${brow(-60, E.brow[0])}${brow(60, -E.brow[1])}${mouth}</g></svg>`;
+}
+async function capture() {
+  const cv = document.getElementById('cv'), g = cv.getContext('2d');
+  if (MODE === 'camera') {
+    const v = document.getElementById('cam'); g.drawImage(v, 0, 0, cv.width, cv.height);
+  } else {
+    const svg = new XMLSerializer().serializeToString(document.getElementById('face'));
+    const img = new Image(); img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+    await img.decode(); g.drawImage(img, 0, 0, cv.width, cv.height);
+  }
+  return cv.toDataURL('image/png');
+}
+async function startCamera() {
+  try { document.getElementById('cam').srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } }); }
+  catch { MODE = 'direct'; }
+  document.getElementById('mode').textContent = MODE;
+}
+let seq = -1;
+async function poll() {
+  try {
+    const f = await (await fetch(`/api/janus/${MIND}/face?condition=${COND}`)).json();
+    if (f.seq && f.seq !== seq) {
+      seq = f.seq; render(f);
+      setTimeout(async () => {
+        const png = await capture();
+        await fetch(`/api/janus/${MIND}/frame?condition=${COND}`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ trial_id: f.trial_id, png, mode: MODE }) });
+      }, DELAY);
+    }
+  } catch {}
+  setTimeout(poll, 300);
+}
+render({ mind: MIND, rendered: 'calm' }); startCamera().then(poll);
+</script></body></html>

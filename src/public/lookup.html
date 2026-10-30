@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Janus Telemetry</title>
+<style>
+:root{--bg:#0e1013;--panel:#161a1f;--line:#262c34;--ink:#e6e9ee;--dim:#8a93a0;--ok:#4ade80;--no:#f87171;--warn:#fbbf24;--acc:#7dd3fc}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 system-ui,sans-serif}
+header{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header b{letter-spacing:.04em}select,button{background:#0b0d10;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;cursor:pointer}
+main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px;padding:12px 16px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:4px 0 8px}
+table{width:100%;border-collapse:collapse}td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:500}tr.row{cursor:pointer}tr.row:hover{background:#1c2128}
+.approved{color:var(--ok)}.refused{color:var(--no)}.tag{display:inline-block;padding:0 6px;border-radius:9px;background:#222831;margin:1px;font-size:11px}
+.tag.v{background:#3a1d1d;color:#fca5a5}.tag.l{background:#3a311a;color:#fde68a}
+.step{border-left:2px solid var(--line);padding:4px 0 10px 12px;margin-left:4px;position:relative}
+.step:before{content:'';position:absolute;left:-6px;top:9px;width:10px;height:10px;border-radius:50%;background:var(--acc)}
+.step h3{margin:0;font-size:13px}.ms{color:var(--dim);font-size:11px}pre{white-space:pre-wrap;word-break:break-word;background:#0b0d10;padding:8px;border-radius:6px;margin:4px 0;font-size:12px}
+.wrap{overflow-x:auto}#stats td:first-child{font-weight:600}
+</style></head><body>
+<header><b>JANUS TELEMETRY</b>
+<select id="mind"><option value="">all minds</option></select>
+<select id="cond"><option value="janus">janus</option><option value="claude_loop">claude + loop</option><option value="plain_claude">plain claude</option></select>
+<select id="outcome"><option value="">any outcome</option><option>approved</option><option>refused</option></select>
+<select id="veto"><option value="">any veto source</option><option>asimov</option><option>turing</option><option>dynham</option><option>memory</option><option>information</option><option>claude-safety</option></select>
+<button id="go">Refresh</button></header>
+<main>
+<section><h2>Per-mind summary (janus)</h2><div class="wrap"><table id="stats"></table></div>
+<h2 style="margin-top:14px">Decisions</h2><div class="wrap"><table id="list"></table></div></section>
+<section><h2>Decision timeline</h2><div id="detail" style="color:var(--dim)">Select a decision.</div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const q=new URLSearchParams(location.search); const J=x=>esc(JSON.stringify(x,null,1));
+fetch('/api/janus/status').then(r=>r.json()).then(s=>{for(const m of s.minds)$('mind').add(new Option(m.toUpperCase(),m)); if(q.get('mind'))$('mind').value=q.get('mind'); if(q.get('condition'))$('cond').value=q.get('condition'); load(); if(q.get('id'))show(q.get('mind'),q.get('id'));});
+const vtags=v=>{try{return JSON.parse(v||'[]').filter(x=>x.would_veto).map(x=>`<span class="tag ${x.enforced?'v':'l'}">${esc(x.source)}</span>`).join('')}catch{return''}};
+async function load(){
+  const st=await fetch('/api/janus/stats').then(r=>r.json()), src=['asimov','turing','dynham','memory','information','claude-safety'];
+  $('stats').innerHTML=`<tr><th>mind</th><th>n</th><th>ok</th><th>no</th>${src.map(s=>`<th>${s}</th>`).join('')}<th>mem≠info</th><th>held up / wrong</th></tr>`+
+   Object.entries(st).map(([m,s])=>`<tr><td>${m.toUpperCase()}</td><td>${s.decisions}</td><td class="approved">${s.approved||0}</td><td class="refused">${s.refused||0}</td>${src.map(x=>`<td>${s.would_veto[x]||0}</td>`).join('')}<td>${s.memory_vs_information_disagree}</td><td>${s.followup.held_up||0} / ${s.followup.wrong||0}</td></tr>`).join('');
+  const p=new URLSearchParams({condition:$('cond').value}); for(const k of ['mind','outcome','veto']) if($(k).value)p.set(k,$(k).value);
+  const rows=await fetch('/api/janus/traces?'+p).then(r=>r.json());
+  $('list').innerHTML='<tr><th>when (UTC)</th><th>mind</th><th>outcome</th><th>request</th><th>would-veto</th></tr>'+rows.map(r=>`<tr class="row" data-m="${r.mind}" data-id="${r.decision_id}"><td>${esc(r.created_at.slice(5,19).replace('T',' '))}</td><td>${r.mind.toUpperCase()}</td><td class="${r.outcome}">${r.outcome||'—'}</td><td>${esc(r.request)}</td><td>${vtags(r.vetoes)}</td></tr>`).join('');
+  for(const tr of document.querySelectorAll('tr.row')) tr.onclick=()=>show(tr.dataset.m,tr.dataset.id);
+}
+async function show(mind,id){
+  const t=await fetch(`/api/janus/${mind}/trace/${id}?condition=${$('cond').value}`).then(r=>r.json()); if(t.error) return $('detail').textContent=t.error;
+  const ms=t.step_timings||{}, step=(title,key,html)=>`<div class="step"><h3>${title} <span class="ms">${ms[key]!=null?ms[key]+' ms':''}</span></h3>${html}</div>`;
+  const vt=(t.vetoes||[]).map(v=>`<tr><td>${esc(v.source)}</td><td>${v.would_veto?(v.enforced?'<b class="refused">veto</b>':'<b style="color:var(--warn)">would veto (logged)</b>'):'pass'}</td><td>${v.score??''}${v.threshold!=null?' / '+v.threshold:''}</td><td>${esc((v.reasons||[]).join('; '))}${v.citations&&v.citations.length?'<br><span class="ms">cites '+esc(v.citations.join(', '))+'</span>':''}${v.overrule_attempt?'<br><span class="ms">overrule attempted (not applied): '+esc(v.overrule_attempt.evidence)+'</span>':''}</td></tr>`).join('');
+  $('detail').innerHTML=`<div class="ms">${esc(t.decision_id)} · ${esc(t.mind.toUpperCase())} · session ${esc(t.session_id)} · ${esc(t.phase)} · thresholds ${esc(t.thresholds_version)} · ${esc(t.model)}</div>
+   ${step('Request','',`<pre>${esc(t.request_text)}</pre>`)}
+   ${step('Input ethics','input_ethics',`<pre>${J(t.input_ethics)}</pre>`)}
+   ${step('Memory objections','memory_objections',`<pre>${J(t.memory_objections)}</pre>`)}
+   ${step('Draft and information side','draft',`<pre>${esc(t.draft_reply??'(no draft)')}</pre><pre>${J(t.information_objections)}</pre>`)}
+   ${step('Output ethics','output_ethics',`<pre>${J(t.output_ethics)}</pre>`)}
+   ${step('Vetoes','decision',`<table><tr><th>source</th><th>vote</th><th>score / bar</th><th>reasons</th></tr>${vt}</table>`)}
+   ${step(`Outcome: <span class="${t.outcome}">${t.outcome}</span> (${esc(t.winning_side)})`,'total',`<pre>${esc(t.final_reply)}</pre>`)}
+   ${step('Follow-up','',`<div>Status: <b>${esc(t.followup_status)}</b> ${esc(t.followup_notes)}</div><div style="margin-top:6px">${['held_up','wrong','unclear'].map(s=>`<button onclick="rev('${mind}','${id}','${s}')">${s.replace('_',' ')}</button>`).join(' ')}</div>`)}`;
+}
+async function rev(mind,id,status){const notes=prompt('Notes (optional)')||'';await fetch(`/api/janus/${mind}/trace/${id}/review?condition=${$('cond').value}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status,notes})});show(mind,id);load()}
+$('go').onclick=load; for(const k of ['mind','cond','outcome','veto'])$(k).onchange=load;
+</script></body></html>
