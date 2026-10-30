@@ -8,6 +8,7 @@ const TABLES = ['episodes', 'ethics_log', 'decision_trace', 'embodiment_trials']
 const open = new Map();
 
 async function baselineDb(condition, mind) {
+  if (!['claude_loop', 'plain_claude'].includes(condition) || !config.MINDS.includes(mind)) throw new Error(`no baseline for ${condition}/${mind}`);
   const k = `${condition}:${mind}`;
   if (open.has(k)) return open.get(k);
   const file = path.join(config.BASELINE_DIR, `${condition}_${mind}.db`);

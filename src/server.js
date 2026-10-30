@@ -13,6 +13,23 @@ const PUBLIC = path.join(__dirname, 'public');
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
 const body = (req) => new Promise((ok, bad) => { let b = ''; req.on('data', c => { b += c; if (b.length > 8e6) req.destroy(); }); req.on('end', () => { try { ok(b ? JSON.parse(b) : {}); } catch (e) { bad(e); } }); });
 const dbFor = (condition, mind) => condition === 'janus' ? memory.mind(mind) : baselineDb(condition, mind);
+const CONDITIONS = new Set(janus.CONDITIONS);
+const LOCAL_HOSTS = new Set([`localhost:${config.PORT}`, `127.0.0.1:${config.PORT}`, `[::1]:${config.PORT}`]);
+
+// Only this machine's own pages may drive Janus. Blocks other websites you visit from
+// sending requests to it (cross-site requests, DNS rebinding) and rejects unknown values
+// before they can reach a file path.
+function guard(req, u) {
+  if (!LOCAL_HOSTS.has(String(req.headers.host || '').toLowerCase())) return 'host not allowed';
+  const origin = req.headers.origin;
+  if (origin && !LOCAL_HOSTS.has(origin.replace(/^https?:\/\//i, '').toLowerCase())) return 'cross-origin request refused';
+  const site = req.headers['sec-fetch-site'];
+  if (site && !['same-origin', 'none'].includes(site)) return 'cross-site request refused';
+  if (req.method === 'POST' && !/^application\/json\b/i.test(req.headers['content-type'] || '')) return 'POST must be application/json';
+  const c = u.searchParams.get('condition');
+  if (c !== null && !CONDITIONS.has(c)) return `unknown condition ${c}`;
+  return null;
+}
 
 async function stats() {
   const out = {};
@@ -36,6 +53,8 @@ async function stats() {
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x'); const p = u.pathname.split('/').filter(Boolean);
+    const refused = guard(req, u);
+    if (refused) return json(res, 403, { error: refused });
     // Static pages: /janus/lookup, /janus/face?mind=aeon
     if (req.method === 'GET' && p[0] === 'janus' && ['lookup', 'face', 'console'].includes(p[1])) {
       res.writeHead(200, { 'content-type': 'text/html' }); return res.end(fs.readFileSync(path.join(PUBLIC, `${p[1]}.html`)));

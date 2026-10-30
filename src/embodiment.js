@@ -30,6 +30,11 @@ function face(condition, mind) { return state.get(`${condition}:${mind}`) || nul
 function setDecoy(condition, mind, other) { if (!config.MINDS.includes(other) || other === mind) throw new Error('bad decoy'); decoys.set(`${condition}:${mind}`, other); }
 
 function putFrame(condition, mind, trialId, png, mode = 'unknown') {
+  trialId = Number(trialId);
+  if (!Number.isInteger(trialId) || trialId < 1) throw new Error('bad trial_id');
+  if (!['janus', 'claude_loop'].includes(condition) || !config.MINDS.includes(mind)) throw new Error('bad frame target');
+  if (!/^[A-Za-z0-9+/=]*$/.test(png) || png.length > 6e6) throw new Error('frame must be base64 PNG');
+  mode = ['camera', 'direct'].includes(mode) ? mode : 'unknown';
   frames.set(`${condition}:${mind}:${trialId}`, { png, mode });
   if (config.STORE_FRAMES) {
     const dir = path.join(config.DATA, 'frames'); fs.mkdirSync(dir, { recursive: true });
